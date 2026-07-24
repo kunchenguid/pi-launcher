@@ -9,9 +9,10 @@ Checks, in order:
   3. .github/workflows/release.yml has every required gate, in order
   4. release.yml references exactly the canonical secret names
   5. release.yml pins the canonical Team ID and bundle ID
-  6. .github/workflows/ci.yml runs the test suite on pull requests
-  7. homebrew/pi-launcher.rb matches the release artifact contract
-  8. no private key material anywhere in the tracked tree
+  6. release-please is anchored at v1.1.0 and calls the signed release workflow
+  7. .github/workflows/ci.yml runs the test suite on pull requests
+  8. homebrew/pi-launcher.rb matches the release artifact contract
+  9. no private key material anywhere in the tracked tree
 """
 
 import json
@@ -151,7 +152,42 @@ check(
     and "Developer ID Application: Kun Chen (9T2J7MNUP9)" in release_yml,
 )
 
-# ---- 6. ci.yml runs tests on PRs without secrets ----
+# ---- 6. release-please handoff ----
+release_please_config = json.loads((ROOT / "release-please-config.json").read_text())
+release_please_manifest = json.loads(
+    (ROOT / ".release-please-manifest.json").read_text()
+)
+release_please_yml = (ROOT / ".github/workflows/release-please.yml").read_text()
+check(
+    "release-please is anchored at published v1.1.0",
+    release_please_manifest == {".": "1.1.0"}
+    and release_please_config.get("bootstrap-sha")
+    == "431fb3ae841dbb46ac81105b72eb5c62c5b6f997"
+    and release_please_config.get("packages", {}).get(".", {}).get("release-type")
+    == "simple",
+)
+check(
+    "release-please calls the signed release workflow after creating a release",
+    "release_created: ${{ steps.release.outputs.release_created }}"
+    in release_please_yml
+    and "tag_name: ${{ steps.release.outputs.tag_name }}" in release_please_yml
+    and "version: ${{ steps.release.outputs.version }}" in release_please_yml
+    and "if: ${{ needs.release-please.outputs.release_created == 'true' }}"
+    in release_please_yml
+    and "uses: ./.github/workflows/release.yml" in release_please_yml
+    and "tag_name: ${{ needs.release-please.outputs.tag_name }}"
+    in release_please_yml
+    and "secrets: inherit" in release_please_yml,
+)
+check(
+    "release.yml supports release-please while retaining tag and manual triggers",
+    'tags:\n      - "v*"' in release_yml
+    and "workflow_dispatch:" in release_yml
+    and "workflow_call:" in release_yml
+    and "description: Release tag created by release-please" in release_yml,
+)
+
+# ---- 7. ci.yml runs tests on PRs without secrets ----
 ci_yml = (ROOT / ".github/workflows/ci.yml").read_text()
 check(
     "ci.yml runs the full test suite on pull_request",
@@ -166,7 +202,7 @@ check(
     "MAC_DEVELOPER_ID" not in ci_yml and "APP_STORE_CONNECT" not in ci_yml,
 )
 
-# ---- 7. Homebrew cask template matches the release contract ----
+# ---- 8. Homebrew cask template matches the release contract ----
 cask = (ROOT / "homebrew/pi-launcher.rb").read_text()
 check(
     "cask url matches the release asset naming",
@@ -183,7 +219,7 @@ check(
     'sha256 "REPLACE_WITH_RELEASE_ZIP_SHA256"' in cask,
 )
 
-# ---- 8. no private key material in the tree ----
+# ---- 9. no private key material in the tree ----
 tracked = subprocess.run(
     ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
 ).stdout.split()
