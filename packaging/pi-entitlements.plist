@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		Entitlements for the bundled Pi executable only (never for the
+		launcher itself). Pi is a Bun-compiled JavaScriptCore runtime; the
+		hardened runtime blocks MAP_JIT without this, which would silently
+		degrade every Pi session to interpreter speed. This is the only
+		entitlement in the whole bundle.
+	-->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+</dict>
+</plist>
