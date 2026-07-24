@@ -120,4 +120,4 @@ make test       # functional + PTY + bundled-Pi smoke suites
 make clean
 ```
 
-The test suite swaps a probe binary into the same bundle layout and drives the launcher through real pseudo-terminals: argv/env/cwd byte-exactness, stdio transparency, exit and signal reproduction, foreground process group, resize, Ctrl-C, Ctrl-Z/`fg`, and Pi-style group suspend, plus negative tests for the fixed-target boundary. Releases are tag-based; see [RELEASE.md](RELEASE.md).
+The test suite swaps a probe binary into the same bundle layout and drives the launcher through real pseudo-terminals: argv/env/cwd byte-exactness, stdio transparency, exit and signal reproduction, foreground process group, resize, Ctrl-C, Ctrl-Z/`fg`, and Pi-style group suspend, plus negative tests for the fixed-target boundary. Releases are cut by merging the release-please PR, not by pushing a tag manually; see [RELEASE.md](RELEASE.md).

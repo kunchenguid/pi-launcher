@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "431fb3ae841dbb46ac81105b72eb5c62c5b6f997",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "pi-launcher"
+    }
+  }
+}

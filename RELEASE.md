@@ -1,6 +1,6 @@
 # pi-launcher release pipeline
 
-Releases are tag-based. Pushing a tag like `v1.2.3` (or dispatching `.github/workflows/release.yml` with a tag name) builds, signs, notarizes, staples, verifies, and publishes `Pi-Launcher-1.2.3.zip` plus `Pi-Launcher-1.2.3.zip.sha256` to the GitHub release for that tag.
+Releases are managed by release-please. Conventional commits merged to `main` produce or update a release PR containing the next version and changelog. Merging that PR creates the `v<version>` tag and GitHub release, then the same workflow calls `.github/workflows/release.yml` to build, sign, notarize, staple, verify, and upload `Pi-Launcher-<version>.zip` plus its checksum. The signed release workflow also retains its tag-push and manual dispatch entry points for recovery.
 
 The pipeline stops at any failed gate: pinned-checksum or upstream `SHA256SUMS` mismatch, missing nested signature, wrong identity, wrong Team ID, wrong bundle ID, missing hardened runtime, missing secure timestamp, unexpected entitlements, notarization failure, stapling failure, Gatekeeper rejection, wrong architecture, or a mismatch between the verified zip and the published download. The last two verification steps run against the exact zip that users and Homebrew download, not an intermediate app.
 
@@ -21,10 +21,13 @@ On GNU/Linux, use `base64 -w0` instead of `base64 -i`. Never commit the `.p12`, 
 
 ## Cut a release
 
-1. Merge everything that should ship. `main` must be green.
-2. Tag: `git tag v1.2.3 && git push origin v1.2.3` (or dispatch the workflow with the tag name).
-3. The workflow resolves the version from the tag, stamps it into the bundle, fetches and re-verifies the pinned upstream Pi, builds, signs inside-out, notarizes, staples, verifies the publication-ready zip, publishes, then downloads the published asset and verifies it again.
-4. If any step fails, do not retry blindly: the failure is the gate working. Fix the cause, re-tag.
+1. Merge conventional commits for everything that should ship. `main` must be green.
+2. Review the release-please PR. Confirm its proposed version and generated `CHANGELOG.md`, then merge it. Do not create or push the release tag by hand.
+3. Release-please creates the tag and GitHub release. Its downstream `signed-release` job calls the existing release workflow with that tag, avoiding GitHub's suppression of separate workflows triggered by `GITHUB_TOKEN` events.
+4. The called workflow stamps the tag version into the bundle, fetches and re-verifies the pinned upstream Pi, builds, signs inside-out, notarizes, staples, verifies the publication-ready zip, uploads it to the release, then downloads and verifies it again.
+5. If any step fails, do not retry blindly: the failure is the gate working. Fix the cause. The release workflow's manual dispatch remains available for recovery against the existing tag.
+
+The release-please manifest is anchored at the published `v1.1.0` release. Never move it backward or manually reuse an existing version.
 
 ## Artifact contract (consumed by the Homebrew tap)
 

@@ -10,6 +10,12 @@ on:
         description: Release tag to build, for example v1.0.0
         required: true
         type: string
+  workflow_call:
+    inputs:
+      tag_name:
+        description: Release tag created by release-please
+        required: true
+        type: string
 
 permissions:
   contents: write
