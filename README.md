@@ -30,6 +30,8 @@
 
 <h3 align="center">Run Pi in your terminal under a stable, signed macOS app identity.</h3>
 
+**Independent project:** pi-launcher is an independent, unofficial launcher for Pi. It is not affiliated with or endorsed by the Pi maintainers.
+
 The official [Pi](https://github.com/earendil-works/pi) standalone macOS binary ships ad-hoc signed: Gatekeeper rejects it, and any tool that binds trust to a code-signed app identity has nothing stable to attach to. In my setup that tool is [Automic Vault](https://www.automicvault.com), which approves credential access by walking the process ancestry and matching designated requirements. An ad-hoc `a.out` signature gives it a different cdhash on every build.
 
 pi-launcher is the smallest fix: a signed, notarized `Pi Launcher.app` whose only executable does one thing - spawn the one official Pi binary bundled inside the same app, then stay alive as its parent in your existing terminal. No GUI, no PTY, no new window. Your terminal session stays exactly as it was; the process ancestry gains a stable signed identity.
@@ -93,7 +95,7 @@ There are no launcher flags. Every argument is passed to Pi byte-for-byte, inclu
 
 - macOS arm64 only (that's what upstream's standalone binary targets).
 - One pinned Pi version per pi-launcher release. Upgrading Pi means a new pi-launcher release; the app does not self-update.
-- Not an official Pi distribution. Pi is Mario Zechner's project; this is an independent wrapper. Report Pi behavior issues upstream, launcher issues here.
+- Pi remains Mario Zechner's project. Report Pi behavior issues upstream, launcher issues here.
 - A signed parent is necessary but not sufficient for Automic Vault recognition: whether Automic binds policy to this app identity is still unproven until the attended live test runs. The identity exists; don't assume the policy match.
 
 ## Verify a Release

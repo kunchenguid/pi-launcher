@@ -41,6 +41,9 @@ jobs:
       - name: Build the unsigned development app
         run: scripts/build-app.sh
 
+      - name: Verify icon and metadata contract
+        run: make test-icon
+
       - name: Run functional tests
         run: make test-functional
 

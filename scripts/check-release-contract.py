@@ -156,6 +156,7 @@ ci_yml = (ROOT / ".github/workflows/ci.yml").read_text()
 check(
     "ci.yml runs the full test suite on pull_request",
     "pull_request:" in ci_yml
+    and "make test-icon" in ci_yml
     and "make test-functional" in ci_yml
     and "make test-pty" in ci_yml
     and "make test-smoke" in ci_yml,
