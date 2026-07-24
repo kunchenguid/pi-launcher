@@ -15,6 +15,7 @@ pi-launcher: a minimal signed macOS app whose executable spawns the one bundled 
 - `src/pi-launcher.c` - the entire launcher. Header comment documents the signal contract.
 - `tests/probe.c` + `tests/functional.py` + `tests/pty_tests.py` - probe-payload test double driven through real PTYs; `make test` runs everything including the bundled-Pi smoke.
 - `scripts/` - fetch/build/sign/verify pipeline; `check-release-contract.py` is the secret-free CI gate for workflow/packaging changes.
+- `packaging/icon/AppIcon.svg` - source for the original app icon; `scripts/build-icon.sh` renders the iconset and icns under ignored `build/`. Do not substitute Pi brand assets without explicit third-party app-branding permission.
 - `.github/workflows/` - `ci.yml` (PR tests, no secrets), `release.yml` (tag-based signed/notarized release; canonical secret names documented in `RELEASE.md`).
 - `homebrew/pi-launcher.rb` - cask contract for the separate tap task; never publish from this repo.
 - Team ID `9T2J7MNUP9`, bundle id `com.kunchenguid.pi-launcher`, app `Pi Launcher.app`, asset `Pi-Launcher-<version>.zip`.

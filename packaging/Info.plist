@@ -8,10 +8,14 @@
 	<string>pi-launcher</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.kunchenguid.pi-launcher</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>Pi Launcher</string>
+	<key>CFBundleGetInfoString</key>
+	<string>Pi Launcher is an independent, unofficial launcher for Pi. It is not affiliated with or endorsed by the Pi maintainers.</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -23,6 +27,6 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026 Kun Chen. Pi is developed by Mario Zechner (MIT).</string>
+	<string>Copyright © 2026 Kun Chen. Pi Launcher is an independent, unofficial launcher for Pi. It is not affiliated with or endorsed by the Pi maintainers. Pi is developed by Mario Zechner (MIT).</string>
 </dict>
 </plist>

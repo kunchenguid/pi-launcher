@@ -16,6 +16,7 @@ VERSION="${VERSION:-0.0.0-dev}"
 PAYLOAD_DIR="${PAYLOAD_DIR:-$REPO_ROOT/build/vendor/pi-tree/pi}"
 APP_DIR="${APP_DIR:-$REPO_ROOT/build/Pi Launcher.app}"
 LAUNCHER_BIN="$REPO_ROOT/build/pi-launcher"
+ICON_FILE="$REPO_ROOT/build/AppIcon.icns"
 
 if [[ ! -x "$PAYLOAD_DIR/pi" ]]; then
   echo "build-app: FAIL: payload $PAYLOAD_DIR has no executable pi (run scripts/fetch-pi.sh first)" >&2
@@ -29,6 +30,10 @@ clang \
   -arch arm64 -mmacosx-version-min=13.0 \
   -o "$LAUNCHER_BIN" \
   "$REPO_ROOT/src/pi-launcher.c"
+
+# Generate the original app icon. The iconset and icns stay under the
+# ignored build tree.
+"$REPO_ROOT/scripts/build-icon.sh" "$ICON_FILE"
 
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
@@ -44,6 +49,7 @@ chmod 755 "$APP_DIR/Contents/MacOS/pi-launcher"
 rm -rf "$APP_DIR/Contents/Resources/pi"
 cp -R "$PAYLOAD_DIR" "$APP_DIR/Contents/Resources/pi"
 cp "$REPO_ROOT/packaging/THIRD-PARTY-NOTICES.md" "$APP_DIR/Contents/Resources/THIRD-PARTY-NOTICES.md"
+cp "$ICON_FILE" "$APP_DIR/Contents/Resources/AppIcon.icns"
 
 # Ad-hoc sign nested code first, then the outer bundle, so the development
 # app is coherent and runnable on Apple Silicon. Release builds re-sign

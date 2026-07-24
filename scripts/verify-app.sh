@@ -30,6 +30,8 @@ fi
 EXPECTED_BUNDLE_ID="com.kunchenguid.pi-launcher"
 EXPECTED_TEAM_ID="9T2J7MNUP9"
 EXPECTED_EXECUTABLE="pi-launcher"
+EXPECTED_ICON_FILE="AppIcon"
+EXPECTED_DISCLAIMER="It is not affiliated with or endorsed by the Pi maintainers."
 
 fail() {
   echo "verify-app: FAIL: $1" >&2
@@ -50,6 +52,14 @@ plist_get() {
   || fail "CFBundleExecutable mismatch"
 [[ "$(plist_get CFBundlePackageType)" == "APPL" ]] \
   || fail "CFBundlePackageType is not APPL"
+[[ "$(plist_get CFBundleIconFile)" == "$EXPECTED_ICON_FILE" ]] \
+  || fail "CFBundleIconFile must be $EXPECTED_ICON_FILE"
+[[ "$(plist_get CFBundleGetInfoString)" == *"independent, unofficial launcher for Pi"* ]] \
+  || fail "CFBundleGetInfoString must identify the independent, unofficial launcher"
+[[ "$(plist_get CFBundleGetInfoString)" == *"$EXPECTED_DISCLAIMER"* ]] \
+  || fail "CFBundleGetInfoString is missing the non-affiliation disclaimer"
+[[ "$(plist_get NSHumanReadableCopyright)" == *"$EXPECTED_DISCLAIMER"* ]] \
+  || fail "NSHumanReadableCopyright is missing the non-affiliation disclaimer"
 [[ "$(plist_get LSUIElement)" == "true" ]] \
   || fail "LSUIElement must be true (agent app, no Dock presence)"
 [[ -x "$APP_DIR/Contents/MacOS/pi-launcher" ]] \
@@ -60,6 +70,11 @@ plist_get() {
   || fail "upstream MIT LICENSE missing from bundle"
 [[ -f "$APP_DIR/Contents/Resources/THIRD-PARTY-NOTICES.md" ]] \
   || fail "THIRD-PARTY-NOTICES.md missing from bundle"
+ICON_PATH="$APP_DIR/Contents/Resources/$EXPECTED_ICON_FILE.icns"
+[[ -f "$ICON_PATH" ]] \
+  || fail "$EXPECTED_ICON_FILE.icns missing from bundle"
+file -b "$ICON_PATH" | grep -q "^Mac OS X icon" \
+  || fail "$EXPECTED_ICON_FILE.icns is not a valid macOS icon"
 
 # ---- Architecture: every Mach-O in the bundle must be arm64 ----
 MACH_O_COUNT=0
