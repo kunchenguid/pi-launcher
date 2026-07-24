@@ -59,6 +59,10 @@ jobs:
           echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
           ZIP_NAME="Pi-Launcher-${RELEASE_VERSION}.zip"
           echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          VERSION_REF='#{version}'
+          CASK_TAG_NAME="${TAG_NAME/$RELEASE_VERSION/$VERSION_REF}"
+          CASK_ZIP_NAME="${ZIP_NAME/$RELEASE_VERSION/$VERSION_REF}"
+          echo "cask_download_url=https://github.com/$GITHUB_REPOSITORY/releases/download/$CASK_TAG_NAME/$CASK_ZIP_NAME" >> "$GITHUB_OUTPUT"
           echo "Releasing pi-launcher $RELEASE_VERSION from $TAG_NAME"
 
       - name: Restore App Store Connect API key
@@ -236,12 +240,15 @@ jobs:
           scripts/verify-app.sh "$EXTRACT_DIR/$APP_NAME" --signed --gatekeeper
 
       - name: Compute artifact checksum
+        id: checksum
         env:
           ZIP_NAME: ${{ steps.version.outputs.zip_name }}
         run: |
           set -euo pipefail
           (cd "$(dirname "$dist_zip")" && shasum -a 256 "$ZIP_NAME" | tee "$ZIP_NAME.sha256")
           cat "$dist_zip.sha256"
+          SHA256="$(awk '{print $1}' "$dist_zip.sha256")"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Publish the GitHub release
         env:
@@ -283,6 +290,51 @@ jobs:
           ditto -x -k "$DOWNLOAD_DIR/$ZIP_NAME" "$EXTRACT_DIR"
           scripts/verify-app.sh "$EXTRACT_DIR/$APP_NAME" --signed --gatekeeper
           echo "Published artifact verified: $ZIP_NAME ($PUBLISHED_SHA)"
+
+      - name: Update Homebrew Cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.release_version }}
+          SHA256: ${{ steps.checksum.outputs.sha256 }}
+          DOWNLOAD_URL: ${{ steps.version.outputs.cask_download_url }}
+        run: |
+          set -euo pipefail
+          : "${HOMEBREW_TAP_TOKEN:?Missing HOMEBREW_TAP_TOKEN}"
+          git_with_tap_auth() {
+            git \
+              -c credential.helper= \
+              -c 'credential.helper=!f() { printf "%s\\n" "username=x-access-token" "password=$HOMEBREW_TAP_TOKEN"; }; f' \
+              "$@"
+          }
+          git_with_tap_auth clone "https://github.com/kunchenguid/homebrew-tap.git" "$RUNNER_TEMP/homebrew-tap"
+          mkdir -p "$RUNNER_TEMP/homebrew-tap/Casks"
+          cat > "$RUNNER_TEMP/homebrew-tap/Casks/pi-launcher.rb" << CASK_EOF
+          cask "pi-launcher" do
+            version "${VERSION}"
+            sha256 "${SHA256}"
+
+            url "${DOWNLOAD_URL}"
+            name "Pi Launcher"
+            desc "Run the bundled Pi CLI under a stable, signed app identity"
+            homepage "https://github.com/kunchenguid/pi-launcher"
+
+            depends_on arch: :arm64
+            depends_on macos: :ventura
+
+            app "Pi Launcher.app"
+            binary "#{appdir}/Pi Launcher.app/Contents/MacOS/pi-launcher", target: "pi-signed"
+
+            uninstall quit: "com.kunchenguid.pi-launcher"
+          end
+          CASK_EOF
+          cd "$RUNNER_TEMP/homebrew-tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/pi-launcher.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "pi-launcher ${VERSION}"
+            git_with_tap_auth push
+          fi
 
       - name: Remove the signing keychain
         if: always()

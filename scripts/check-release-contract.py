@@ -9,10 +9,11 @@ Checks, in order:
   3. .github/workflows/release.yml has every required gate, in order
   4. release.yml references exactly the canonical secret names
   5. release.yml pins the canonical Team ID and bundle ID
-  6. release-please is anchored at v1.1.0 and calls the signed release workflow
-  7. .github/workflows/ci.yml runs the test suite on pull requests
-  8. homebrew/pi-launcher.rb matches the release artifact contract
-  9. no private key material anywhere in the tracked tree
+  6. Homebrew tap updates only after the published artifact is verified
+  7. release-please is anchored at v1.1.0 and calls the signed release workflow
+  8. .github/workflows/ci.yml runs the test suite on pull requests
+  9. homebrew/pi-launcher.rb matches the release artifact contract
+  10. no private key material anywhere in the tracked tree
 """
 
 import json
@@ -137,6 +138,7 @@ canonical = {
     "MAC_DEVELOPER_ID_CERT_P12",
     "MAC_DEVELOPER_ID_CERT_PASSWORD",
     "GITHUB_TOKEN",
+    "HOMEBREW_TAP_TOKEN",
 }
 check(
     "release.yml references exactly the canonical secrets",
@@ -152,7 +154,69 @@ check(
     and "Developer ID Application: Kun Chen (9T2J7MNUP9)" in release_yml,
 )
 
-# ---- 6. release-please handoff ----
+# ---- 6. Homebrew tap handoff ----
+publish_pos = release_yml.find("- name: Publish the GitHub release")
+published_verify_pos = release_yml.find("- name: Verify the published artifact")
+homebrew_pos = release_yml.find("- name: Update Homebrew Cask")
+cleanup_pos = release_yml.find("- name: Remove the signing keychain")
+check(
+    "Homebrew update runs only after publication and published-artifact verification",
+    -1 not in (publish_pos, published_verify_pos, homebrew_pos, cleanup_pos)
+    and publish_pos < published_verify_pos < homebrew_pos < cleanup_pos,
+)
+check(
+    "Homebrew update consumes the release version, URL, and checksum outputs",
+    'VERSION: ${{ steps.version.outputs.release_version }}' in release_yml
+    and 'SHA256: ${{ steps.checksum.outputs.sha256 }}' in release_yml
+    and 'DOWNLOAD_URL: ${{ steps.version.outputs.cask_download_url }}' in release_yml
+    and 'echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"' in release_yml
+    and 'CASK_TAG_NAME="${TAG_NAME/$RELEASE_VERSION/$VERSION_REF}"' in release_yml
+    and 'CASK_ZIP_NAME="${ZIP_NAME/$RELEASE_VERSION/$VERSION_REF}"' in release_yml,
+)
+check(
+    "Homebrew tap credentials are ephemeral and absent from the remote URL",
+    'git_with_tap_auth clone "https://github.com/kunchenguid/homebrew-tap.git"'
+    in release_yml
+    and "password=$HOMEBREW_TAP_TOKEN" in release_yml
+    and "x-access-token:${HOMEBREW_TAP_TOKEN}@" not in release_yml,
+)
+expected_generated_cask = '''cask "pi-launcher" do
+  version "${VERSION}"
+  sha256 "${SHA256}"
+
+  url "${DOWNLOAD_URL}"
+  name "Pi Launcher"
+  desc "Run the bundled Pi CLI under a stable, signed app identity"
+  homepage "https://github.com/kunchenguid/pi-launcher"
+
+  depends_on arch: :arm64
+  depends_on macos: :ventura
+
+  app "Pi Launcher.app"
+  binary "#{appdir}/Pi Launcher.app/Contents/MacOS/pi-launcher", target: "pi-signed"
+
+  uninstall quit: "com.kunchenguid.pi-launcher"
+end
+'''
+heredoc_match = re.search(
+    r'cat > "\$RUNNER_TEMP/homebrew-tap/Casks/pi-launcher\.rb" << CASK_EOF\n'
+    r'(?P<body>.*?)'
+    r'^          CASK_EOF$',
+    release_yml,
+    re.MULTILINE | re.DOTALL,
+)
+generated_cask = ""
+if heredoc_match:
+    generated_cask = "\n".join(
+        line.removeprefix("          ")
+        for line in heredoc_match.group("body").splitlines()
+    ) + "\n"
+check(
+    "Homebrew generator preserves the seeded pi-launcher cask structure",
+    generated_cask == expected_generated_cask,
+)
+
+# ---- 7. release-please handoff ----
 release_please_config = json.loads((ROOT / "release-please-config.json").read_text())
 release_please_manifest = json.loads(
     (ROOT / ".release-please-manifest.json").read_text()
@@ -187,7 +251,7 @@ check(
     and "description: Release tag created by release-please" in release_yml,
 )
 
-# ---- 7. ci.yml runs tests on PRs without secrets ----
+# ---- 8. ci.yml runs tests on PRs without secrets ----
 ci_yml = (ROOT / ".github/workflows/ci.yml").read_text()
 check(
     "ci.yml runs the full test suite on pull_request",
@@ -202,7 +266,7 @@ check(
     "MAC_DEVELOPER_ID" not in ci_yml and "APP_STORE_CONNECT" not in ci_yml,
 )
 
-# ---- 8. Homebrew cask template matches the release contract ----
+# ---- 9. Homebrew cask template matches the release contract ----
 cask = (ROOT / "homebrew/pi-launcher.rb").read_text()
 check(
     "cask url matches the release asset naming",
@@ -219,7 +283,7 @@ check(
     'sha256 "REPLACE_WITH_RELEASE_ZIP_SHA256"' in cask,
 )
 
-# ---- 9. no private key material in the tree ----
+# ---- 10. no private key material in the tree ----
 tracked = subprocess.run(
     ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
 ).stdout.split()
