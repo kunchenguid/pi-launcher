@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build unsigned app and run full test suite
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint shell scripts
+        run: |
+          set -euo pipefail
+          for f in scripts/*.sh; do
+            bash -n "$f"
+          done
+          brew list --versions shellcheck >/dev/null 2>&1 || brew install shellcheck --quiet
+          shellcheck -S warning scripts/*.sh
+
+      - name: Compile with strict warnings
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          clang -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror \
+            -arch arm64 -mmacosx-version-min=13.0 \
+            -o build/pi-launcher src/pi-launcher.c
+
+      - name: Fetch and verify the pinned upstream Pi release
+        run: scripts/fetch-pi.sh
+
+      - name: Build the unsigned development app
+        run: scripts/build-app.sh
+
+      - name: Run functional tests
+        run: make test-functional
+
+      - name: Run pseudo-terminal tests
+        run: make test-pty
+
+      - name: Run bundled-Pi smoke test
+        run: make test-smoke
+
+  contract:
+    name: Validate release pipeline and packaging contracts
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check release contracts
+        run: python3 scripts/check-release-contract.py

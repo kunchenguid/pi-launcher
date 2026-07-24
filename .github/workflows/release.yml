@@ -1,0 +1,284 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Release tag to build, for example v1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag_name || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  TEAM_ID: 9T2J7MNUP9
+  BUNDLE_ID: com.kunchenguid.pi-launcher
+  SIGN_IDENTITY: "Developer ID Application: Kun Chen (9T2J7MNUP9)"
+  APP_NAME: "Pi Launcher.app"
+
+jobs:
+  release:
+    name: Build, sign, notarize, and publish
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref_name }}
+
+      - name: Resolve release version
+        id: version
+        env:
+          INPUT_TAG_NAME: ${{ inputs.tag_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          TAG_NAME="${INPUT_TAG_NAME:-$REF_NAME}"
+          RELEASE_VERSION="${TAG_NAME#v}"
+          if ! [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag '$TAG_NAME' must resolve to a version like 1.2.3" >&2
+            exit 1
+          fi
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          ZIP_NAME="Pi-Launcher-${RELEASE_VERSION}.zip"
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "Releasing pi-launcher $RELEASE_VERSION from $TAG_NAME"
+
+      - name: Restore App Store Connect API key
+        id: asc-key
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          : "${APP_STORE_CONNECT_KEY_ID:?Missing APP_STORE_CONNECT_KEY_ID: set it with: printf '%s' 'KEY_ID' | gh secret set APP_STORE_CONNECT_KEY_ID --repo kunchenguid/pi-launcher}"
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID: set it with: printf '%s' 'ISSUER_ID' | gh secret set APP_STORE_CONNECT_ISSUER_ID --repo kunchenguid/pi-launcher}"
+          : "${APP_STORE_CONNECT_API_KEY:?Missing APP_STORE_CONNECT_API_KEY: set it with: base64 -i AuthKey_KEYID.p8 | gh secret set APP_STORE_CONNECT_API_KEY --repo kunchenguid/pi-launcher}"
+
+          mkdir -p "$HOME/private_keys"
+          KEY_PATH="$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          export KEY_PATH
+
+          python3 <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          key_path = Path(os.environ["KEY_PATH"])
+          encoded = os.environ["APP_STORE_CONNECT_API_KEY"]
+          key_path.write_bytes(base64.b64decode(encoded))
+          PY
+
+          chmod 600 "$KEY_PATH"
+          echo "key_path=$KEY_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Developer ID Application certificate
+        id: developer_id_cert
+        env:
+          MAC_DEVELOPER_ID_CERT_P12: ${{ secrets.MAC_DEVELOPER_ID_CERT_P12 }}
+          MAC_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MAC_DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MAC_DEVELOPER_ID_CERT_P12:-}" ]; then
+            echo "::error title=Missing MAC_DEVELOPER_ID_CERT_P12::The Developer ID Application p12 secret is empty. Re-set it with: base64 -i DeveloperID_Application.p12 | tr -d '\n' | gh secret set MAC_DEVELOPER_ID_CERT_P12 --repo kunchenguid/pi-launcher" >&2
+            exit 1
+          fi
+          if [ -z "${MAC_DEVELOPER_ID_CERT_PASSWORD:-}" ]; then
+            echo "::error title=Missing MAC_DEVELOPER_ID_CERT_PASSWORD::Set the p12 export password with: printf '%s' 'THE_P12_PASSWORD' | gh secret set MAC_DEVELOPER_ID_CERT_PASSWORD --repo kunchenguid/pi-launcher" >&2
+            exit 1
+          fi
+
+          CERT_PATH="$RUNNER_TEMP/DeveloperID_Application.p12"
+          export CERT_PATH
+
+          python3 <<'PY'
+          import base64
+          import binascii
+          import os
+          import sys
+          from pathlib import Path
+
+          encoded = os.environ["MAC_DEVELOPER_ID_CERT_P12"]
+          normalized = "".join(encoded.split())
+          if not normalized:
+              print("::error title=Missing MAC_DEVELOPER_ID_CERT_P12::The secret is empty after whitespace normalization.", file=sys.stderr)
+              sys.exit(1)
+          try:
+              decoded = base64.b64decode(normalized, validate=True)
+          except binascii.Error as exc:
+              print(f"::error title=Invalid MAC_DEVELOPER_ID_CERT_P12::Not valid base64: {exc}", file=sys.stderr)
+              sys.exit(1)
+          if not decoded:
+              print("::error title=Invalid MAC_DEVELOPER_ID_CERT_P12::The secret decoded to an empty file.", file=sys.stderr)
+              sys.exit(1)
+          Path(os.environ["CERT_PATH"]).write_bytes(decoded)
+          PY
+
+          chmod 600 "$CERT_PATH"
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/pi-launcher-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)-$(uuidgen)"
+          export KEYCHAIN_PATH KEYCHAIN_PASSWORD
+
+          # The keychain must survive this step: codesign runs in a later
+          # step. The final cleanup step deletes it (runners are ephemeral,
+          # but tidy is tidy).
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          IMPORT_LOG="$RUNNER_TEMP/developer-id-import.log"
+          if ! security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -f pkcs12 -P "$MAC_DEVELOPER_ID_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security >"$IMPORT_LOG" 2>&1; then
+            IMPORT_ERROR="$(tr '\n' ' ' < "$IMPORT_LOG" | sed 's/[[:space:]]\+/ /g' | cut -c 1-800)"
+            echo "::error title=Invalid Developer ID certificate::The decoded MAC_DEVELOPER_ID_CERT_P12 could not be imported. Usually this means MAC_DEVELOPER_ID_CERT_PASSWORD is wrong or the p12 export is malformed. security import: $IMPORT_ERROR" >&2
+            exit 1
+          fi
+
+          # codesign must find the keychain and must not trigger an interactive
+          # partition-list prompt on the headless runner.
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed -e 's/ *"//g' -e 's/"//g' | tr '\n' ' ')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+
+          if ! security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -q "$SIGN_IDENTITY"; then
+            echo "::error title=Wrong signing identity::The restored keychain does not contain '$SIGN_IDENTITY'. The Developer ID Application certificate must belong to Team $TEAM_ID." >&2
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" >&2 || true
+            exit 1
+          fi
+
+          echo "keychain_path=$KEYCHAIN_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch and verify the pinned upstream Pi release
+        run: |
+          set -euo pipefail
+          scripts/fetch-pi.sh
+          echo "pi_version=$(python3 -c "import json; print(json.load(open('packaging/pi-release.json'))['version'])")" >> "$GITHUB_ENV"
+
+      - name: Build the app bundle
+        env:
+          VERSION: ${{ steps.version.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          scripts/build-app.sh
+          echo "app_path=build/$APP_NAME" >> "$GITHUB_ENV"
+
+      - name: Sign nested code, then the outer app
+        env:
+          KEYCHAIN: ${{ steps.developer_id_cert.outputs.keychain_path }}
+          APP_DIR: ${{ github.workspace }}/build/Pi Launcher.app
+        run: scripts/sign-app.sh
+
+      - name: Verify the signed app
+        run: scripts/verify-app.sh "$app_path" --signed
+
+      - name: Package for notarization
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/notary" && mkdir -p "$RUNNER_TEMP/notary"
+          cp -R "$app_path" "$RUNNER_TEMP/notary/$APP_NAME"
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/notary/$APP_NAME" "$RUNNER_TEMP/notary/notarize.zip"
+          echo "notary_zip=$RUNNER_TEMP/notary/notarize.zip" >> "$GITHUB_ENV"
+
+      - name: Notarize
+        env:
+          APPLE_API_KEY: ${{ steps.asc-key.outputs.key_path }}
+          APPLE_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool submit "$notary_zip" \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+
+      - name: Staple and build the distribution zip
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
+          ZIP_NAME: ${{ steps.version.outputs.zip_name }}
+        run: |
+          set -euo pipefail
+          xcrun stapler staple "$app_path"
+          rm -rf "$RUNNER_TEMP/dist" && mkdir -p "$RUNNER_TEMP/dist"
+          cp -R "$app_path" "$RUNNER_TEMP/dist/$APP_NAME"
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/dist/$APP_NAME" "$RUNNER_TEMP/dist/$ZIP_NAME"
+          echo "dist_zip=$RUNNER_TEMP/dist/$ZIP_NAME" >> "$GITHUB_ENV"
+
+      - name: Verify the publication-ready artifact
+        # Fresh extraction of the exact zip that will be published: signature,
+        # identity, hardened runtime, notarization ticket, Gatekeeper.
+        run: |
+          set -euo pipefail
+          EXTRACT_DIR="$RUNNER_TEMP/final-verify"
+          rm -rf "$EXTRACT_DIR" && mkdir -p "$EXTRACT_DIR"
+          ditto -x -k "$dist_zip" "$EXTRACT_DIR"
+          scripts/verify-app.sh "$EXTRACT_DIR/$APP_NAME" --signed --gatekeeper
+
+      - name: Compute artifact checksum
+        env:
+          ZIP_NAME: ${{ steps.version.outputs.zip_name }}
+        run: |
+          set -euo pipefail
+          (cd "$(dirname "$dist_zip")" && shasum -a 256 "$ZIP_NAME" | tee "$ZIP_NAME.sha256")
+          cat "$dist_zip.sha256"
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.version.outputs.tag_name }}
+          RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
+          ZIP_NAME: ${{ steps.version.outputs.zip_name }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" \
+              --title "pi-launcher $RELEASE_VERSION" \
+              --notes "Signed, notarized Pi Launcher $RELEASE_VERSION. Bundles the official Pi $pi_version standalone (pinned in packaging/pi-release.json). See README.md for verification and install instructions."
+          fi
+          gh release upload "$TAG_NAME" --clobber "$dist_zip" "$dist_zip.sha256"
+
+      - name: Verify the published artifact
+        # Download exactly what users and Homebrew will get, and re-run the
+        # full gate against it. A release that only verifies intermediates is
+        # not a verified release.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.version.outputs.tag_name }}
+          ZIP_NAME: ${{ steps.version.outputs.zip_name }}
+        run: |
+          set -euo pipefail
+          DOWNLOAD_DIR="$RUNNER_TEMP/downloaded-verify"
+          rm -rf "$DOWNLOAD_DIR" && mkdir -p "$DOWNLOAD_DIR"
+          gh release download "$TAG_NAME" --pattern "$ZIP_NAME" --pattern "$ZIP_NAME.sha256" --dir "$DOWNLOAD_DIR" --clobber
+          (cd "$DOWNLOAD_DIR" && shasum -a 256 -c "$ZIP_NAME.sha256")
+          LOCAL_SHA="$(shasum -a 256 "$dist_zip" | awk '{print $1}')"
+          PUBLISHED_SHA="$(shasum -a 256 "$DOWNLOAD_DIR/$ZIP_NAME" | awk '{print $1}')"
+          if [ "$LOCAL_SHA" != "$PUBLISHED_SHA" ]; then
+            echo "Published artifact sha256 $PUBLISHED_SHA does not match the verified zip $LOCAL_SHA" >&2
+            exit 1
+          fi
+          EXTRACT_DIR="$RUNNER_TEMP/downloaded-extract"
+          mkdir -p "$EXTRACT_DIR"
+          ditto -x -k "$DOWNLOAD_DIR/$ZIP_NAME" "$EXTRACT_DIR"
+          scripts/verify-app.sh "$EXTRACT_DIR/$APP_NAME" --signed --gatekeeper
+          echo "Published artifact verified: $ZIP_NAME ($PUBLISHED_SHA)"
+
+      - name: Remove the signing keychain
+        if: always()
+        continue-on-error: true
+        run: security delete-keychain "${{ steps.developer_id_cert.outputs.keychain_path }}" || true
