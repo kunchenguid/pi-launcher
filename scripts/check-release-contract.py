@@ -10,10 +10,13 @@ Checks, in order:
   4. release.yml references exactly the canonical secret names
   5. release.yml pins the canonical Team ID and bundle ID
   6. Homebrew tap updates only after the published artifact is verified
-  7. release-please is anchored at v1.1.0 and calls the signed release workflow
+  7. release-please is anchored at v1.1.0, keeps the human path, and gates the
+     autonomous merge mode used by the upstream Pi updater
   8. .github/workflows/ci.yml runs the test suite on pull requests
-  9. homebrew/pi-launcher.rb matches the release artifact contract
-  10. no private key material anywhere in the tracked tree
+  9. .github/workflows/upstream-pi-sync.yml gates every upstream Pi bump before
+     it can reach main, and quarantines a failure instead of retrying
+  10. homebrew/pi-launcher.rb matches the release artifact contract
+  11. no private key material anywhere in the tracked tree
 """
 
 import json
@@ -129,6 +132,25 @@ for token in (
 ):
     check(f"release.yml contains '{token}'", token in release_yml)
 
+# A signature check proves structure, not launchability: the signed bundle,
+# the publication-ready zip, and the downloaded published zip must each start
+# the bundled Pi and report the pinned version.
+launch_gates = [m.start() for m in re.finditer(r"scripts/check-app-version\.sh", release_yml)]
+check(
+    "release.yml launches the signed app, the publication zip, and the published zip",
+    len(launch_gates) == 3
+    and release_yml.find("- name: Verify the signed app")
+    < launch_gates[0]
+    < release_yml.find("- name: Package for notarization")
+    and release_yml.find("- name: Verify the publication-ready artifact")
+    < launch_gates[1]
+    < release_yml.find("- name: Compute artifact checksum")
+    and release_yml.find("- name: Verify the published artifact")
+    < launch_gates[2]
+    < release_yml.find("- name: Update Homebrew Cask"),
+    f"gates at {launch_gates}",
+)
+
 # ---- 4. canonical secrets only ----
 referenced = set(re.findall(r"secrets\.([A-Z0-9_]+)", release_yml))
 canonical = {
@@ -232,16 +254,32 @@ check(
 )
 check(
     "release-please calls the signed release workflow after creating a release",
-    "release_created: ${{ steps.release.outputs.release_created }}"
+    "release_created: ${{ steps.outcome.outputs.release_created }}"
     in release_please_yml
-    and "tag_name: ${{ steps.release.outputs.tag_name }}" in release_please_yml
-    and "version: ${{ steps.release.outputs.version }}" in release_please_yml
+    and "tag_name: ${{ steps.outcome.outputs.tag_name }}" in release_please_yml
+    and "version: ${{ steps.outcome.outputs.version }}" in release_please_yml
     and "if: ${{ needs.release-please.outputs.release_created == 'true' }}"
     in release_please_yml
     and "uses: ./.github/workflows/release.yml" in release_please_yml
     and "tag_name: ${{ needs.release-please.outputs.tag_name }}"
     in release_please_yml
     and "secrets: inherit" in release_please_yml,
+)
+check(
+    "release-please keeps the human push-to-main path",
+    "push:\n    branches:\n      - main" in release_please_yml,
+)
+# Autonomous mode is opt-in per call, merges through the checked-in guard, and
+# re-runs release-please in the same run because a GITHUB_TOKEN merge does not
+# start a new workflow.
+check(
+    "release-please auto-merge is an opt-in, guarded, two-pass mode",
+    "workflow_call:" in release_please_yml
+    and "auto_merge_release_pr:" in release_please_yml
+    and "default: false" in release_please_yml
+    and release_please_yml.count("googleapis/release-please-action@v4") == 2
+    and "python3 scripts/merge-release-pr.py" in release_please_yml
+    and release_please_yml.count("if: ${{ inputs.auto_merge_release_pr }}") == 2,
 )
 check(
     "release.yml supports release-please while retaining tag and manual triggers",
@@ -262,11 +300,82 @@ check(
     and "make test-smoke" in ci_yml,
 )
 check(
+    "ci.yml runs the release automation script tests",
+    "make test-scripts" in ci_yml,
+)
+check(
     "ci.yml does not reference signing secrets",
     "MAC_DEVELOPER_ID" not in ci_yml and "APP_STORE_CONNECT" not in ci_yml,
 )
 
-# ---- 9. Homebrew cask template matches the release contract ----
+# ---- 9. the autonomous upstream Pi updater ----
+sync_yml = (ROOT / ".github/workflows/upstream-pi-sync.yml").read_text()
+check(
+    "upstream-pi-sync runs on a schedule and never cancels itself mid-release",
+    "schedule:" in sync_yml
+    and re.search(r"- cron: \"\d+ \d+ \* \* \*\"", sync_yml) is not None
+    and "group: pi-upstream-sync" in sync_yml
+    and "cancel-in-progress: false" in sync_yml,
+)
+check(
+    "upstream-pi-sync discovers on Ubuntu and gates on macOS",
+    "runs-on: ubuntu-latest" in sync_yml and "runs-on: macos-26" in sync_yml,
+)
+check(
+    "upstream-pi-sync never reads a signing or notarization secret",
+    "MAC_DEVELOPER_ID" not in sync_yml
+    and "APP_STORE_CONNECT" not in sync_yml
+    and "HOMEBREW_TAP_TOKEN" not in sync_yml,
+)
+# The whole point of the updater: every gate runs against the candidate pin
+# before a single byte of it reaches main.
+sync_sequence = [
+    "scripts/update-pi-pin.py --check",
+    "scripts/pi-quarantine.py status",
+    "scripts/update-pi-pin.py --write",
+    "scripts/fetch-pi.sh",
+    "make test-icon",
+    "make test-functional",
+    "make test-pty",
+    "make test-smoke",
+    "python3 scripts/check-release-contract.py",
+    "git push origin",
+]
+sync_positions = []
+for token in sync_sequence:
+    pos = sync_yml.find(token)
+    if pos < 0:
+        break
+    sync_positions.append(pos)
+check(
+    "upstream-pi-sync gates the candidate pin before it can reach main",
+    len(sync_positions) == len(sync_sequence)
+    and sync_positions == sorted(sync_positions),
+    f"found {len(sync_positions)}/{len(sync_sequence)} tokens, "
+    f"ordered={sync_positions == sorted(sync_positions)}",
+)
+check(
+    "upstream-pi-sync pushes only onto the exact commit it tested",
+    'if [ "$REMOTE" != "$BASE_SHA" ]' in sync_yml
+    and "--force" not in sync_yml,
+)
+check(
+    "upstream-pi-sync releases only through release-please autonomous mode",
+    "uses: ./.github/workflows/release-please.yml" in sync_yml
+    and "auto_merge_release_pr: true" in sync_yml
+    and "secrets: inherit" in sync_yml
+    and "if: ${{ needs.gate.outputs.pushed == 'true' }}" in sync_yml,
+)
+check(
+    "upstream-pi-sync quarantines a failure instead of retrying it",
+    "scripts/pi-quarantine.py open" in sync_yml
+    and "needs.discover.result == 'failure'" in sync_yml
+    and "needs.gate.result == 'failure'" in sync_yml
+    and "needs.release.result == 'failure'" in sync_yml
+    and "needs.discover.outputs.quarantined != 'true'" in sync_yml,
+)
+
+# ---- 10. Homebrew cask template matches the release contract ----
 cask = (ROOT / "homebrew/pi-launcher.rb").read_text()
 check(
     "cask url matches the release asset naming",
@@ -283,7 +392,7 @@ check(
     'sha256 "REPLACE_WITH_RELEASE_ZIP_SHA256"' in cask,
 )
 
-# ---- 10. no private key material in the tree ----
+# ---- 11. no private key material in the tree ----
 tracked = subprocess.run(
     ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
 ).stdout.split()
