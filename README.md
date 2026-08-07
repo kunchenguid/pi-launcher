@@ -88,13 +88,14 @@ There are no launcher flags. Every argument is passed to Pi byte-for-byte, inclu
 
 - The launcher can execute exactly one file: `Contents/Resources/pi/pi` inside its own app bundle. There is no code path that resolves a command from `PATH`, from an environment variable, or from an argument. The test suite includes negative tests that try all three.
 - The bundled Pi is the official `pi-darwin-arm64.tar.gz` from [earendil-works/pi releases](https://github.com/earendil-works/pi/releases), pinned in `packaging/pi-release.json` and verified against both the pinned checksum and upstream's `SHA256SUMS` at build time. Its MIT license ships in the bundle.
+- The pin follows upstream automatically: a daily workflow picks up new *stable* Pi releases only, and a candidate is only committed and released after it passes the whole suite - provenance, functional, real-PTY, and a bundled-Pi launch smoke test - on a build made from it. A Pi release that fails any gate is held back and reported, not shipped. See [RELEASE.md](RELEASE.md).
 - Signing: Developer ID Application (Team `9T2J7MNUP9`), hardened runtime, secure timestamps, nested code signed inside-out, notarized, stapled. The launcher itself has zero entitlements.
 - This is a process wrapper, not a sandbox. Pi still runs with your full user permissions, same as always.
 
 ## Limitations
 
 - macOS arm64 only (that's what upstream's standalone binary targets).
-- One pinned Pi version per pi-launcher release. Upgrading Pi means a new pi-launcher release; the app does not self-update.
+- One pinned Pi version per pi-launcher release. Upgrading Pi means a new pi-launcher release; the app itself does not self-update - `brew upgrade` (or a fresh download) is how you get the newer bundle.
 - Pi remains Mario Zechner's project. Report Pi behavior issues upstream, launcher issues here.
 - A signed parent is necessary but not sufficient for Automic Vault recognition: whether Automic binds policy to this app identity is still unproven until the attended live test runs. The identity exists; don't assume the policy match.
 

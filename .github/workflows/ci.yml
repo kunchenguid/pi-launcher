@@ -28,6 +28,9 @@ jobs:
       - name: Assert release-please PR CI exclusions
         run: bash scripts/check-release-ci-exclusions.sh
 
+      - name: Test the release automation scripts
+        run: make test-scripts
+
       - name: Lint shell scripts
         run: |
           set -euo pipefail

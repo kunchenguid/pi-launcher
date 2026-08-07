@@ -6,7 +6,7 @@ LAUNCHER_EXE := $(APP)/Contents/MacOS/pi-launcher
 TEST_LAUNCHER_EXE := $(TEST_APP)/Contents/MacOS/pi-launcher
 PI_VERSION := $(shell python3 -c "import json; print(json.load(open('packaging/pi-release.json'))['version'])")
 
-.PHONY: all fetch app test-app test test-icon test-functional test-pty test-smoke verify clean
+.PHONY: all fetch app test-app test test-scripts test-icon test-functional test-pty test-smoke verify clean
 
 all: app
 
@@ -33,7 +33,12 @@ test-app:
 	  APP_DIR="$(CURDIR)/$(TEST_APP)" \
 	  scripts/build-app.sh
 
-test: test-icon test-functional test-pty test-smoke
+test: test-scripts test-icon test-functional test-pty test-smoke
+
+# Hermetic, no network and no bundle: the upstream-Pi updater, the release-PR
+# merge guard, and the quarantine rules against a fake GitHub API.
+test-scripts:
+	python3 tests/automation_tests.py
 
 test-icon: app
 	python3 tests/icon_contract.py "$(APP)"

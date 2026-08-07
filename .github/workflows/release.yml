@@ -194,6 +194,11 @@ jobs:
       - name: Verify the signed app
         run: scripts/verify-app.sh "$app_path" --signed
 
+      - name: Launch the signed app and check the bundled Pi version
+        # Signature structure is not launchability: prove the signed bundle
+        # still starts the pinned Pi before it is notarized and shipped.
+        run: scripts/check-app-version.sh "$app_path" "$pi_version"
+
       - name: Package for notarization
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.release_version }}
@@ -238,6 +243,7 @@ jobs:
           rm -rf "$EXTRACT_DIR" && mkdir -p "$EXTRACT_DIR"
           ditto -x -k "$dist_zip" "$EXTRACT_DIR"
           scripts/verify-app.sh "$EXTRACT_DIR/$APP_NAME" --signed --gatekeeper
+          scripts/check-app-version.sh "$EXTRACT_DIR/$APP_NAME" "$pi_version"
 
       - name: Compute artifact checksum
         id: checksum
@@ -289,6 +295,7 @@ jobs:
           mkdir -p "$EXTRACT_DIR"
           ditto -x -k "$DOWNLOAD_DIR/$ZIP_NAME" "$EXTRACT_DIR"
           scripts/verify-app.sh "$EXTRACT_DIR/$APP_NAME" --signed --gatekeeper
+          scripts/check-app-version.sh "$EXTRACT_DIR/$APP_NAME" "$pi_version"
           echo "Published artifact verified: $ZIP_NAME ($PUBLISHED_SHA)"
 
       - name: Update Homebrew Cask

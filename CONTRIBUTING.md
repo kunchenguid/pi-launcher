@@ -14,4 +14,4 @@ Issues and PRs are welcome. A few ground rules that keep this project what it is
 3. `python3 scripts/check-release-contract.py` must pass if you touch packaging, workflows, or the cask template.
 4. Open the PR. CI runs the same suite on macos-26 without any signing secret.
 
-To bump the bundled Pi version: update `packaging/pi-release.json` (version, tag, URLs, both checksums) in its own PR, and say why the new upstream version is worth shipping.
+Bumping the bundled Pi version is automated: `.github/workflows/upstream-pi-sync.yml` runs daily, generates the new `packaging/pi-release.json` with `scripts/update-pi-pin.py`, and only commits it after the full suite passes against the candidate. See [RELEASE.md](RELEASE.md). If you want to bump it by hand anyway - to pick up a release sooner, or to move to a version the updater has quarantined - regenerate the pin with `GITHUB_TOKEN=... python3 scripts/update-pi-pin.py --write` rather than editing the JSON, keep it in its own PR, and say why the new upstream version is worth shipping.

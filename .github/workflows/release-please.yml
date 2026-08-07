@@ -1,9 +1,30 @@
 name: release-please
 
+# release-please remains the sole owner of the launcher version, changelog,
+# tag, and GitHub release. Human-authored releases keep the unchanged
+# push-to-main behavior: a release PR is opened and a human merges it.
+#
+# The guarded upstream Pi updater calls this workflow with
+# auto_merge_release_pr: true. That is the only autonomous mode, and its only
+# extra authority is merging the exact release-please output PR after
+# scripts/merge-release-pr.py verifies it. Repository-wide auto-merge stays
+# off. Because a GITHUB_TOKEN merge does not start a new workflow run, the
+# release-please action is invoked a second time in this same run so the tag
+# and release are created without depending on a suppressed event.
+
 on:
   push:
     branches:
       - main
+  workflow_call:
+    inputs:
+      auto_merge_release_pr:
+        description: >-
+          Autonomous mode: merge the generated release PR after a strict
+          file-set check, then create the release in this same run.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -14,14 +35,61 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      release_created: ${{ steps.outcome.outputs.release_created }}
+      tag_name: ${{ steps.outcome.outputs.tag_name }}
+      version: ${{ steps.outcome.outputs.version }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: googleapis/release-please-action@v4
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge the generated release PR
+        id: merge
+        if: ${{ inputs.auto_merge_release_pr }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_PLEASE_PR: ${{ steps.release.outputs.pr }}
+          RELEASE_PLEASE_RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+        run: python3 scripts/merge-release-pr.py
+
+      - uses: googleapis/release-please-action@v4
+        id: release_after_merge
+        if: ${{ inputs.auto_merge_release_pr }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve the release outcome
+        id: outcome
+        env:
+          AUTONOMOUS: ${{ inputs.auto_merge_release_pr }}
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+          VERSION: ${{ steps.release.outputs.version }}
+          MERGED_RELEASE_CREATED: ${{ steps.release_after_merge.outputs.release_created }}
+          MERGED_TAG_NAME: ${{ steps.release_after_merge.outputs.tag_name }}
+          MERGED_VERSION: ${{ steps.release_after_merge.outputs.version }}
+          MERGED_PR: ${{ steps.merge.outputs.merged_pr }}
+        run: |
+          set -euo pipefail
+          if [ "$AUTONOMOUS" = "true" ]; then
+            RELEASE_CREATED="$MERGED_RELEASE_CREATED"
+            TAG_NAME="$MERGED_TAG_NAME"
+            VERSION="$MERGED_VERSION"
+            if [ "$RELEASE_CREATED" != "true" ] || [ -z "$TAG_NAME" ]; then
+              echo "Autonomous mode merged release PR #${MERGED_PR:-?} but release-please did not create a release; refusing to continue" >&2
+              exit 1
+            fi
+            echo "Autonomous release $TAG_NAME from merged PR #$MERGED_PR" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          {
+            echo "release_created=${RELEASE_CREATED:-false}"
+            echo "tag_name=${TAG_NAME:-}"
+            echo "version=${VERSION:-}"
+          } >> "$GITHUB_OUTPUT"
 
   signed-release:
     name: Sign and publish ${{ needs.release-please.outputs.version }}

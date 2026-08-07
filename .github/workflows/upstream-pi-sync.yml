@@ -1,0 +1,253 @@
+name: Upstream Pi sync
+
+# Daily, stable-only, fully guarded refresh of the bundled Pi pin.
+#
+# Shape of the run:
+#   discover (ubuntu)  cheap GitHub API lookup; no macOS minutes, no secrets
+#   gate     (macOS)   the whole launcher suite against the candidate pin,
+#                      BEFORE anything is committed to main
+#   release            the existing release-please -> signed release ->
+#                      notarize -> publish -> Homebrew pipeline, unchanged
+#   quarantine         one durable labelled issue per failed Pi tag; that tag
+#                      is never retried until the issue is closed
+#
+# This workflow only maintains the supply-chain pin. It adds no self-update
+# capability to the app and weakens no launcher invariant.
+
+on:
+  schedule:
+    # Daily, deliberately off the hour to avoid the scheduler's busiest slots.
+    # GitHub may delay scheduled runs, so this is daily convergence, not a
+    # timing guarantee.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Run discovery and the full gate, but never mutate main
+        type: boolean
+        default: false
+
+# Never cancel a run that may already be notarizing or publishing.
+concurrency:
+  group: pi-upstream-sync
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  discover:
+    name: Discover the latest stable upstream Pi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      update_available: ${{ steps.discover.outputs.update_available }}
+      current_version: ${{ steps.discover.outputs.current_version }}
+      target_version: ${{ steps.discover.outputs.target_version }}
+      target_tag: ${{ steps.discover.outputs.target_tag }}
+      quarantined: ${{ steps.quarantine.outputs.quarantined }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-check the updater scripts
+        run: make test-scripts
+
+      - name: Resolve the latest stable Pi release
+        id: discover
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/update-pi-pin.py --check
+
+      - name: Check the quarantine list for this Pi tag
+        id: quarantine
+        if: steps.discover.outputs.update_available == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TARGET_TAG: ${{ steps.discover.outputs.target_tag }}
+        run: python3 scripts/pi-quarantine.py status --key "$TARGET_TAG"
+
+      - name: Summarize
+        env:
+          UPDATE: ${{ steps.discover.outputs.update_available }}
+          CURRENT: ${{ steps.discover.outputs.current_version }}
+          TARGET: ${{ steps.discover.outputs.target_version }}
+          QUARANTINED: ${{ steps.quarantine.outputs.quarantined }}
+          ISSUE: ${{ steps.quarantine.outputs.issue_url }}
+        run: |
+          set -euo pipefail
+          if [ "$UPDATE" != "true" ]; then
+            echo "Pinned Pi $CURRENT is the latest stable release. No change." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$QUARANTINED" = "true" ]; then
+            echo "Pi $TARGET is quarantined by $ISSUE. Not attempted." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Pi $CURRENT -> $TARGET: running the full launcher gate." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  gate:
+    name: Gate Pi ${{ needs.discover.outputs.target_version }} through the full launcher suite
+    needs: discover
+    if: >-
+      needs.discover.outputs.update_available == 'true' &&
+      needs.discover.outputs.quarantined != 'true'
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    outputs:
+      pushed: ${{ steps.push.outputs.pushed }}
+      base_sha: ${{ steps.base.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record the main commit under test
+        id: base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Write the candidate pin into the workspace
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/update-pi-pin.py --write
+
+      - name: Assert the candidate touches only the pin
+        run: |
+          set -euo pipefail
+          CHANGED="$(git diff --name-only)"
+          if [ "$CHANGED" != "packaging/pi-release.json" ]; then
+            echo "The updater changed unexpected files:" >&2
+            printf '%s\n' "$CHANGED" >&2
+            exit 1
+          fi
+          git --no-pager diff -- packaging/pi-release.json
+
+      - name: Lint shell scripts
+        run: |
+          set -euo pipefail
+          for f in scripts/*.sh; do
+            bash -n "$f"
+          done
+          brew list --versions shellcheck >/dev/null 2>&1 || brew install shellcheck --quiet
+          shellcheck -S warning scripts/*.sh
+
+      - name: Compile with strict warnings
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          clang -O2 -std=c11 -Wall -Wextra -Wpedantic -Werror \
+            -arch arm64 -mmacosx-version-min=13.0 \
+            -o build/pi-launcher src/pi-launcher.c
+
+      - name: Fetch and verify the candidate upstream Pi release
+        run: scripts/fetch-pi.sh
+
+      - name: Verify icon and metadata contract
+        run: make test-icon
+
+      - name: Run functional tests
+        run: make test-functional
+
+      - name: Run pseudo-terminal tests
+        run: make test-pty
+
+      - name: Run bundled-Pi smoke test
+        run: make test-smoke
+
+      - name: Check release contracts
+        run: python3 scripts/check-release-contract.py
+
+      - name: Commit and push the pin
+        id: push
+        if: ${{ inputs.dry_run != true }}
+        env:
+          TARGET_VERSION: ${{ needs.discover.outputs.target_version }}
+          TARGET_TAG: ${{ needs.discover.outputs.target_tag }}
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packaging/pi-release.json
+          git commit -m "fix: bundle Pi $TARGET_VERSION" \
+            -m "Upstream $TARGET_TAG, verified against the official SHA256SUMS and gated by the full launcher suite on $BASE_SHA."
+          # Main must still be exactly the commit these gates ran against; a
+          # concurrent change fails the run instead of shipping an untested mix.
+          git fetch origin main
+          REMOTE="$(git rev-parse origin/main)"
+          if [ "$REMOTE" != "$BASE_SHA" ]; then
+            echo "main moved from $BASE_SHA to $REMOTE during the gate; not pushing" >&2
+            exit 1
+          fi
+          git push origin "HEAD:main"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "Pinned Pi $TARGET_VERSION on main." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report the dry run
+        if: ${{ inputs.dry_run == true }}
+        env:
+          TARGET_VERSION: ${{ needs.discover.outputs.target_version }}
+        run: |
+          echo "Dry run: Pi $TARGET_VERSION passed every gate; main untouched." >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Release the bumped launcher
+    needs: [discover, gate]
+    if: ${{ needs.gate.outputs.pushed == 'true' }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    # Autonomous mode: release-please still owns the version, changelog, tag,
+    # and GitHub release, and still hands off to the signed release workflow.
+    # The only added authority is merging its own output-only release PR.
+    uses: ./.github/workflows/release-please.yml
+    with:
+      auto_merge_release_pr: true
+    secrets: inherit
+
+  quarantine:
+    name: Quarantine and alert
+    needs: [discover, gate, release]
+    if: >-
+      ${{ always() && (needs.discover.result == 'failure'
+      || needs.gate.result == 'failure'
+      || needs.release.result == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File or refresh the blocked-tag issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          GATE_RESULT: ${{ needs.gate.result }}
+          TARGET_TAG: ${{ needs.discover.outputs.target_tag }}
+          BASE_SHA: ${{ needs.gate.outputs.base_sha }}
+          PIN_PUSHED: ${{ needs.gate.outputs.pushed }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$DISCOVER_RESULT" = "failure" ] || [ -z "$TARGET_TAG" ]; then
+            KEY="discovery"
+            STAGE="upstream discovery"
+          elif [ "$GATE_RESULT" = "failure" ]; then
+            KEY="$TARGET_TAG"
+            STAGE="the pre-mutation build and launcher gate"
+          else
+            KEY="$TARGET_TAG"
+            STAGE="the signed release pipeline"
+          fi
+          python3 scripts/pi-quarantine.py open \
+            --key "$KEY" \
+            --stage "$STAGE" \
+            --run-url "$RUN_URL" \
+            --base-sha "$BASE_SHA" \
+            --pin-pushed "${PIN_PUSHED:-false}"
