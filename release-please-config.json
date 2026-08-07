@@ -4,7 +4,8 @@
   "packages": {
     ".": {
       "release-type": "simple",
-      "package-name": "pi-launcher"
+      "package-name": "pi-launcher",
+      "include-component-in-tag": false
     }
   }
 }
