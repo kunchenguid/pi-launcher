@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.1](https://github.com/kunchenguid/pi-launcher/compare/v1.2.0...v1.2.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* bundle Pi 0.84.1 ([4ed9de1](https://github.com/kunchenguid/pi-launcher/commit/4ed9de15ba2b7ff44b1c5597d1ea6e8d80852502))
+* pin release-please tags to bare vX.Y.Z ([#10](https://github.com/kunchenguid/pi-launcher/issues/10)) ([5fbce23](https://github.com/kunchenguid/pi-launcher/commit/5fbce23650f0ab2a72c241a49759cf99098b682e))
+
 ## [1.2.0](https://github.com/kunchenguid/pi-launcher/compare/pi-launcher-v1.1.0...pi-launcher-v1.2.0) (2026-08-07)
 
 
