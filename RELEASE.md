@@ -41,7 +41,7 @@ On GNU/Linux, use `base64 -w0` instead of `base64 -i`. Never commit the `.p12`, 
 4. The called workflow stamps the tag version into the bundle, fetches and re-verifies the pinned upstream Pi, builds, signs inside-out, notarizes, staples, verifies the publication-ready zip, uploads it to the release, then downloads and verifies it again.
 5. If any step fails, do not retry blindly: the failure is the gate working. Fix the cause. The release workflow's manual dispatch remains available for recovery against the existing tag.
 
-The release-please manifest is anchored at the published `v1.2.0` release. Never move it backward or manually reuse an existing version.
+The release-please manifest is anchored at the published `v1.2.1` release. Never move it backward or manually reuse an existing version.
 
 Release-please tags are always bare `v<version>` (`release-please-config.json` sets `include-component-in-tag: false`), matching `release.yml`'s tag parsing, the Homebrew cask download URL, and `scripts/check-release-contract.py`. If `package-name` is ever needed for something else, that flag must stay explicit or a future release-please default change can silently reintroduce a component-prefixed tag (`<package>-v<version>`) that `release.yml` rejects and that ships an empty, asset-less release - exactly what happened with `pi-launcher-v1.2.0`.
 
