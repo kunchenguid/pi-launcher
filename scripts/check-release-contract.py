@@ -10,7 +10,7 @@ Checks, in order:
   4. release.yml references exactly the canonical secret names
   5. release.yml pins the canonical Team ID and bundle ID
   6. Homebrew tap updates only after the published artifact is verified
-  7. release-please is anchored at v1.2.0, tags releases as bare vX.Y.Z with
+  7. release-please is anchored at v1.2.1, tags releases as bare vX.Y.Z with
      no component prefix, keeps the human path, and gates the autonomous
      merge mode used by the upstream Pi updater
   8. .github/workflows/ci.yml runs the test suite on pull requests
@@ -246,8 +246,8 @@ release_please_manifest = json.loads(
 )
 release_please_yml = (ROOT / ".github/workflows/release-please.yml").read_text()
 check(
-    "release-please is anchored at published v1.2.0",
-    release_please_manifest == {".": "1.2.0"}
+    "release-please is anchored at published v1.2.1",
+    release_please_manifest == {".": "1.2.1"}
     and release_please_config.get("bootstrap-sha")
     == "431fb3ae841dbb46ac81105b72eb5c62c5b6f997"
     and release_please_config.get("packages", {}).get(".", {}).get("release-type")
