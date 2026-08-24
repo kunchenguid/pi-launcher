@@ -25,6 +25,7 @@ import json
 import re
 import subprocess
 import sys
+import textwrap
 import urllib.request
 from pathlib import Path
 
@@ -268,24 +269,29 @@ def main():
         and "password=$HOMEBREW_TAP_TOKEN" in release_yml
         and "x-access-token:${HOMEBREW_TAP_TOKEN}@" not in release_yml,
     )
-    expected_generated_cask = '''cask "pi-launcher" do
-      version "${VERSION}"
-      sha256 "${SHA256}"
+    # dedent so wrapping this script in main() cannot re-indent the fixture
+    # and fail the generator the way the 4-space wrap did on PR 16.
+    expected_generated_cask = textwrap.dedent(
+        """\
+        cask "pi-launcher" do
+          version "${VERSION}"
+          sha256 "${SHA256}"
 
-      url "${DOWNLOAD_URL}"
-      name "Pi Launcher"
-      desc "Run the bundled Pi CLI under a stable, signed app identity"
-      homepage "https://github.com/kunchenguid/pi-launcher"
+          url "${DOWNLOAD_URL}"
+          name "Pi Launcher"
+          desc "Run the bundled Pi CLI under a stable, signed app identity"
+          homepage "https://github.com/kunchenguid/pi-launcher"
 
-      depends_on arch: :arm64
-      depends_on macos: :ventura
+          depends_on arch: :arm64
+          depends_on macos: :ventura
 
-      app "Pi Launcher.app"
-      binary "#{appdir}/Pi Launcher.app/Contents/MacOS/pi-launcher", target: "pi-signed"
+          app "Pi Launcher.app"
+          binary "#{appdir}/Pi Launcher.app/Contents/MacOS/pi-launcher", target: "pi-signed"
 
-      uninstall quit: "com.kunchenguid.pi-launcher"
-    end
-    '''
+          uninstall quit: "com.kunchenguid.pi-launcher"
+        end
+        """
+    )
     heredoc_match = re.search(
         r'cat > "\$RUNNER_TEMP/homebrew-tap/Casks/pi-launcher\.rb" << CASK_EOF\n'
         r'(?P<body>.*?)'
@@ -387,8 +393,9 @@ def main():
         "MAC_DEVELOPER_ID" not in ci_yml and "APP_STORE_CONNECT" not in ci_yml,
     )
     check(
-        "ci.yml contract job fetches tags so the published-version check can see them",
-        "fetch-tags: true" in ci_yml,
+        "ci.yml contract job fetches published tags (checkout fetch-tags is not enough)",
+        "fetch-depth: 0" in ci_yml
+        and "git fetch --tags --force origin" in ci_yml,
     )
 
     # ---- 9. the autonomous upstream Pi updater ----
