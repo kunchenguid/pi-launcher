@@ -36,7 +36,8 @@ test-app:
 test: test-scripts test-icon test-functional test-pty test-smoke
 
 # Hermetic, no network and no bundle: the upstream-Pi updater, the release-PR
-# merge guard, and the quarantine rules against a fake GitHub API.
+# merge guard, the quarantine rules, and the release-please last-released
+# version check against a fake GitHub API / in-process fixtures.
 test-scripts:
 	python3 tests/automation_tests.py
 
