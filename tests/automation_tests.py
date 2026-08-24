@@ -2,11 +2,13 @@
 """
 automation_tests.py - hermetic tests for the release automation scripts.
 
-Drives scripts/update-pi-pin.py, scripts/merge-release-pr.py, and
-scripts/pi-quarantine.py against a fake GitHub API, so the daily autonomous
-updater's decisions - what it accepts as a stable upstream release, what it is
-willing to merge, and when it refuses to retry - are exercised rather than
-assumed. No network, no repository state.
+Drives scripts/update-pi-pin.py, scripts/merge-release-pr.py,
+scripts/pi-quarantine.py, and the release-please last-released-version helper
+in scripts/check-release-contract.py against a fake GitHub API / in-process
+fixtures, so the daily autonomous updater's decisions - what it accepts as a
+stable upstream release, what it is willing to merge, when it refuses to
+retry, and that a new launcher release cannot fail the Pi gate - are
+exercised rather than assumed. No network, no repository state.
 
 Usage: automation_tests.py
 """
@@ -713,6 +715,83 @@ check(
     "the quarantine label is created when the repository lacks it",
     [call[1] for call in client.writes] == [f"/repos/{REPO}/labels", f"/repos/{REPO}/issues"],
     f"writes={client.writes}",
+)
+
+# =====================================================================
+# check-release-contract.py: release-please last-released version
+# =====================================================================
+#
+# Reproduced 2026-08-15: gate run 31865351430 launched Pi 0.84.2, then
+# check-release-contract.py failed `release-please is anchored at published
+# v1.2.0` because launcher 1.2.1 had already updated the manifest. Quarantine
+# then blocked v0.84.2. The last-released version must come from published
+# tags, not a hardcoded launcher version.
+
+contract = load_script("check-release-contract.py")
+SIMPLE_CONFIG = {
+    "bootstrap-sha": contract.RELEASE_PLEASE_BOOTSTRAP_SHA,
+    "packages": {".": {"release-type": "simple"}},
+}
+# Tags as they existed after launcher 1.2.1: the tree the failed Pi gate saw.
+TAGS_AFTER_1_2_1 = [
+    "v1.0.0",
+    "v1.1.0",
+    "v1.2.0",
+    "pi-launcher-v1.2.0",
+    "v1.2.1",
+]
+
+
+def anchor(manifest_version, config=None, tags=None):
+    return contract.release_please_anchor_status(
+        {".": manifest_version},
+        config if config is not None else SIMPLE_CONFIG,
+        tags if tags is not None else TAGS_AFTER_1_2_1,
+    )
+
+
+ok, detail = anchor("1.2.1")
+check(
+    "after launcher 1.2.1 the Pi-updater contract still passes",
+    ok,
+    detail,
+)
+ok, detail = anchor("1.3.0", tags=TAGS_AFTER_1_2_1 + ["v1.3.0"])
+check(
+    "a later launcher release does not require a contract-script version bump",
+    ok,
+    detail,
+)
+ok, detail = anchor("1.2.0")
+check(
+    "a manifest left behind the latest published tag is refused",
+    not ok and "manifest=1.2.0" in detail and "1.2.1" in detail,
+    detail,
+)
+ok, detail = anchor(
+    "1.2.1",
+    config={
+        "bootstrap-sha": "0" * 40,
+        "packages": {".": {"release-type": "simple"}},
+    },
+)
+check(
+    "moving the historical bootstrap-sha is refused",
+    not ok and "bootstrap-sha" in detail,
+    detail,
+)
+check(
+    "component-prefixed tags are not treated as published launcher versions",
+    contract.latest_published_launcher_version(
+        ["pi-launcher-v1.2.0", "v1.2.0", "v1.1.0"]
+    )
+    == "1.2.0",
+)
+ok, detail = anchor("1.2.1", tags=["pi-launcher-v1.2.1"])
+check(
+    "a tree with only a component-prefixed tag has no published version",
+    not ok and "no published" in detail,
+    detail,
 )
 
 print()
