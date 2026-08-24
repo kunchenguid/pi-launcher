@@ -395,7 +395,7 @@ def main():
     check(
         "ci.yml contract job fetches published tags (checkout fetch-tags is not enough)",
         "fetch-depth: 0" in ci_yml
-        and "git fetch --tags --force origin" in ci_yml,
+        and "git fetch --tags origin" in ci_yml,
     )
 
     # ---- 9. the autonomous upstream Pi updater ----

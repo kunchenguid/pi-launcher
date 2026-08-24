@@ -106,7 +106,7 @@ jobs:
 
       # checkout fetch-tags: true still leaves git tag -l empty on a PR-style ref.
       - name: Fetch published version tags
-        run: git fetch --tags --force origin
+        run: git fetch --tags origin
 
       - name: Record the main commit under test
         id: base
