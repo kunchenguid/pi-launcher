@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.2](https://github.com/kunchenguid/pi-launcher/compare/v1.2.1...v1.2.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* align release contract with v1.2.1 ([#14](https://github.com/kunchenguid/pi-launcher/issues/14)) ([3fec4bf](https://github.com/kunchenguid/pi-launcher/commit/3fec4bfe4da385203bf3b54319acd3c51d051c7d))
+* bundle Pi 0.84.3 ([6a2121b](https://github.com/kunchenguid/pi-launcher/commit/6a2121b8cd2acdb5a7ecdef1f7ddfa6fc5991a49))
+* stop hardcoding the last launcher version in the Pi-updater gate ([#16](https://github.com/kunchenguid/pi-launcher/issues/16)) ([564fa16](https://github.com/kunchenguid/pi-launcher/commit/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50))
+
 ## [1.2.1](https://github.com/kunchenguid/pi-launcher/compare/v1.2.0...v1.2.1) (2026-08-08)
 
 
