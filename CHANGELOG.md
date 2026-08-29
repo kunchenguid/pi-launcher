@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/kunchenguid/pi-launcher/compare/v1.2.2...v1.2.3) (2026-08-29)
+
+
+### Bug Fixes
+
+* bundle Pi 0.84.4 ([4280325](https://github.com/kunchenguid/pi-launcher/commit/4280325a24fbc5f2c0eb5651fb5bf3841bcbd213))
+
 ## [1.2.2](https://github.com/kunchenguid/pi-launcher/compare/v1.2.1...v1.2.2) (2026-08-25)
 
 
