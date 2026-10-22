@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.18](https://github.com/kunchenguid/pi-launcher/compare/v1.2.17...v1.2.18) (2026-10-22)
+
+
+### Bug Fixes
+
+* bundle Pi 1.4.0 ([e3abce7](https://github.com/kunchenguid/pi-launcher/commit/e3abce79d46fd2ebeafc5ff2d1f869060d5d226f))
+
 ## [1.2.17](https://github.com/kunchenguid/pi-launcher/compare/v1.2.16...v1.2.17) (2026-10-16)
 
 
