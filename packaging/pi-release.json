@@ -1,10 +1,10 @@
 {
   "upstream": "https://github.com/earendil-works/pi",
-  "tag": "v1.6.1",
-  "version": "1.6.1",
-  "url": "https://github.com/earendil-works/pi/releases/download/v1.6.1/pi-darwin-arm64.tar.gz",
-  "sha256": "d8fd8e24c2a5054ae383d83b26f6eb6f950edf613917e434a52394f44cd4d933",
-  "sumsUrl": "https://github.com/earendil-works/pi/releases/download/v1.6.1/SHA256SUMS",
-  "licenseUrl": "https://raw.githubusercontent.com/earendil-works/pi/v1.6.1/LICENSE",
-  "licenseSha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48"
+  "tag": "v1.7.0",
+  "version": "1.7.0",
+  "url": "https://github.com/earendil-works/pi/releases/download/v1.7.0/pi-darwin-arm64.tar.gz",
+  "sha256": "ff95a9ae160a55bb0417b35031a86c3fa52b39216999fba540b53568f2efc6eb",
+  "sumsUrl": "https://github.com/earendil-works/pi/releases/download/v1.7.0/SHA256SUMS",
+  "licenseUrl": "https://raw.githubusercontent.com/earendil-works/pi/v1.7.0/LICENSE",
+  "licenseSha256": "4780a6e9d4b2213784027092b8f305d49059728495fab1ddb93f3c6fb8b283c7"
 }
